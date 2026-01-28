@@ -1,0 +1,515 @@
+---
+title: "Phenology: GAMs"
+author: "Ashwini Petchiappan"
+date: "2023-08-15"
+output: rmdformats::readthedown
+#output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r libraries and data, include=FALSE}
+setwd("/Users/ash/Documents/Academic/Oxford/Dissertation/R/Phenology/")
+
+## Libraries
+library(dplyr)
+library(lme4)
+library(mgcv)
+#library(sjPlot)
+library(GGally)
+library(ggplot2)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(ggspatial)
+library(scico)
+library(ggrepel)
+library(ggpubr)
+library(reshape2)
+library(corrplot)
+library(scales)
+
+
+# Data-------------------------------------
+
+file_name <- paste('Data/phenology_lmm_spring.csv') 
+phenology.spring <- read.csv(file_name)
+
+file_name <- paste('Data/phenology_lmm_fall.csv') 
+phenology.fall <- read.csv(file_name)
+
+# Renaming columns-------------------------
+
+phenology.spring <- phenology.spring %>% 
+  rename(
+    enso = enso_index,
+    nao = nao_index,
+    lon = LONGITUDE_W,
+    lat = LATITUDE_N
+  )
+
+phenology.fall <- phenology.fall %>% 
+  rename(
+    enso = enso_index,
+    nao = nao_index,
+    lon = LONGITUDE_W,
+    lat = LATITUDE_N
+  )
+
+phenology.spring$radar_id <- factor(phenology.spring$radar_id)
+phenology.fall$radar_id <- factor(phenology.fall$radar_id)
+
+```
+
+
+# Plot code
+
+```{r plot function}
+
+plot_oscillation_slope <- function(gam_model,phenology,res=50) {
+  
+  pred_grid_df <- with(phenology,
+                       expand.grid(
+                         temp=mean(temp),
+                         year=median(year),
+                         lat=seq(min(lat)-1,max(lat)+1,length.out=res),
+                         lon=seq(min(lon)-1,max(lon)+1,length.out=res),
+                         climate="A"
+  ))
+  # dim(pred_grid_df)
+  # head(pred_grid_df)
+  
+  pred_grid_df$pred_low <- predict(gam_model,newdata=pred_grid_df %>% mutate(enso=-1,
+                                                                             nao=-1),
+                              newdata.guaranteed=TRUE,
+                              exclude="s(radar_id)")
+  
+  pred_grid_df$pred_high <- predict(gam_model,newdata=pred_grid_df %>% mutate(enso=1,
+                                                                              nao=1),
+                              newdata.guaranteed=TRUE,
+                              exclude="s(radar_id)")
+  
+  pred_grid_df <- pred_grid_df %>% mutate(`Slope\n(days per\noscillation\nunit)`=(pred_high-pred_low)/2) # 1 - (-1) = 2
+  
+  sf_use_s2(FALSE) # hack to fix bug
+  the_map <- st_as_sf(maps::map("usa", plot = FALSE, fill = TRUE))
+  pred_grid_df <- st_as_sf(pred_grid_df,coords=c('lon','lat'))
+  st_crs(pred_grid_df) <- st_crs(the_map)
+  the_map <- st_make_valid(the_map)
+  
+  pred_grid_df <- st_filter(pred_grid_df,the_map)
+  dim(pred_grid_df)
+  
+  
+  usa_map <- map_data("usa")
+  #usa_map <- ne_countries(country='United States of America', scale = "medium", returnclass = "sf")
+  axis_text_size = 4
+  
+  ggplot(data=usa_map) +
+    geom_tile(data=pred_grid_df %>% bind_cols(st_coordinates(pred_grid_df)),
+         mapping=aes(x=X,y=Y,fill=`Slope\n(days per\noscillation\nunit)`)) +
+    geom_polygon(data=usa_map,
+                 mapping=aes(long, lat, group = group),
+                 fill = "transparent", colour = "gray20") +
+    coord_quickmap() + #projection
+    scale_fill_scico("Days", palette = 'vik', 
+                      midpoint = 0, direction = -1) +
+    theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = "aliceblue"),
+        axis.text.x = element_text(colour = "grey50", size = axis_text_size),
+        axis.text.y = element_text(colour = "grey50", size = axis_text_size),
+        axis.ticks = element_line(color = "grey50"),
+        panel.border = element_blank()) +
+    labs(title = NULL, #caption = "Days per oscillation unit",
+       x = NULL, y = NULL)
+
+}
+
+```
+
+# ENSO
+
+## Spring
+
+### q10
+
+```{r}
+
+s.gam.q10 <- gam(q10 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(enso) +
+                       ti(enso,lat) + ti(enso,lon) + ti(enso,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.spring,method="ML")
+
+summary(s.gam.q10)
+
+p1 <- plot_oscillation_slope(s.gam.q10,phenology.spring)
+
+```
+
+### q50
+
+```{r}
+
+s.gam.q50 <- gam(q50 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(enso) +
+                       ti(enso,lat) + ti(enso,lon) + ti(enso,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.spring,method="ML")
+
+
+summary(s.gam.q50)
+
+p2 <- plot_oscillation_slope(s.gam.q50,phenology.spring)
+
+```
+
+### q90
+
+```{r}
+
+s.gam.q90 <- gam(q90 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(enso) +
+                       ti(enso,lat) + ti(enso,lon) + ti(enso,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.spring,method="ML")
+
+summary(s.gam.q90)
+
+p3 <- plot_oscillation_slope(s.gam.q90,phenology.spring)
+
+```
+
+### Duration (q90-q10)
+
+```{r}
+
+s.gam.q90.q10 <- gam(q90-q10 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(enso) +
+                       ti(enso,lat) + ti(enso,lon) + ti(enso,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.spring,method="ML")
+
+summary(s.gam.q90.q10)
+
+p4 <- plot_oscillation_slope(s.gam.q90.q10,phenology.spring)
+
+```
+
+## Fall
+
+### q10
+
+```{r}
+
+f.gam.q10 <- gam(q10 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(enso) +
+                       ti(enso,lat) + ti(enso,lon) + ti(enso,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.fall,method="ML")
+
+summary(f.gam.q10)
+
+p5 <- plot_oscillation_slope(f.gam.q10,phenology.fall)
+
+```
+
+### q50
+
+```{r}
+
+f.gam.q50 <- gam(q50 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(enso) +
+                       ti(enso,lat) + ti(enso,lon) + ti(enso,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.fall,method="ML")
+
+
+summary(f.gam.q50)
+
+p6 <- plot_oscillation_slope(f.gam.q50,phenology.fall)
+
+```
+
+### q90
+
+```{r}
+
+f.gam.q90 <- gam(q90 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(enso) +
+                       ti(enso,lat) + ti(enso,lon) + ti(enso,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.fall,method="ML")
+
+summary(f.gam.q90)
+
+p7 <- plot_oscillation_slope(f.gam.q90,phenology.fall)
+
+```
+
+### Duration (q90-q10)
+
+```{r}
+
+f.gam.q90.q10 <- gam(q90-q10 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(enso) +
+                       ti(enso,lat) + ti(enso,lon) + ti(enso,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.fall,method="ML")
+
+summary(f.gam.q90.q10)
+
+p8 <- plot_oscillation_slope(f.gam.q90.q10,phenology.fall)
+
+```
+
+# NAO
+
+## Spring
+
+### q10
+
+```{r}
+
+s.gam.q10 <- gam(q10 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(nao) +
+                       ti(nao,lat) + ti(nao,lon) + ti(nao,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.spring,method="ML")
+
+summary(s.gam.q10)
+
+p11 <- plot_oscillation_slope(s.gam.q10,phenology.spring)
+
+```
+
+### q50
+
+```{r}
+
+s.gam.q50 <- gam(q50 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(nao) +
+                       ti(nao,lat) + ti(nao,lon) + ti(nao,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.spring,method="ML")
+
+
+summary(s.gam.q50)
+
+p12 <- plot_oscillation_slope(s.gam.q50,phenology.spring)
+
+```
+
+### q90
+
+```{r}
+
+s.gam.q90 <- gam(q90 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(nao) +
+                       ti(nao,lat) + ti(nao,lon) + ti(nao,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.spring,method="ML")
+
+summary(s.gam.q90)
+
+p13 <- plot_oscillation_slope(s.gam.q90,phenology.spring)
+
+```
+
+### Duration (q90-q10)
+
+```{r}
+
+s.gam.q90.q10 <- gam(q90-q10 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(nao) +
+                       ti(nao,lat) + ti(nao,lon) + ti(nao,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.spring,method="ML")
+
+summary(s.gam.q90.q10)
+
+p14 <- plot_oscillation_slope(s.gam.q90.q10,phenology.spring)
+
+```
+
+## Fall
+
+### q10
+
+```{r}
+
+f.gam.q10 <- gam(q10 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(nao) +
+                       ti(nao,lat) + ti(nao,lon) + ti(nao,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.fall,method="ML")
+
+summary(f.gam.q10)
+
+p15 <- plot_oscillation_slope(f.gam.q10,phenology.fall)
+
+```
+
+### q50
+
+```{r}
+
+f.gam.q50 <- gam(q50 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(nao) +
+                       ti(nao,lat) + ti(nao,lon) + ti(nao,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.fall,method="ML")
+
+
+summary(f.gam.q50)
+
+p16 <- plot_oscillation_slope(f.gam.q50,phenology.fall)
+
+```
+
+### q90
+
+```{r}
+
+f.gam.q90 <- gam(q90 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(nao) +
+                       ti(nao,lat) + ti(nao,lon) + ti(nao,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.fall,method="ML")
+
+summary(f.gam.q90)
+
+p17 <- plot_oscillation_slope(f.gam.q90,phenology.fall)
+
+```
+
+### Duration (q90-q10)
+
+```{r}
+
+f.gam.q90.q10 <- gam(q90-q10 ~ temp + year + climate + 
+                       ti(lat) + ti(lon) + ti(lat,lon) + ti(nao) +
+                       ti(nao,lat) + ti(nao,lon) + ti(nao,lat,lon) +
+                       s(radar_id,bs="re"),
+                       data=phenology.fall,method="ML")
+
+summary(f.gam.q90.q10)
+
+p18 <- plot_oscillation_slope(f.gam.q90.q10,phenology.fall)
+
+```
+
+## Maps
+
+### ENSO
+
+```{r maps enso}
+
+ggarrange(ggarrange(p1,
+                    p2,
+                    p3, 
+                    p4,
+                    
+                    nrow=4, ncol=1, labels = c("A q10","B q50",
+                                               "C q90","D D"), 
+                    vjust = 1, align="none",
+                    common.legend = TRUE, legend="right"),
+          ggarrange(p5,
+                    p6,
+                    p7, 
+                    p8,
+                    
+                    nrow=4, ncol=1, labels = c("E","F","G","H"),
+                    vjust = 1, align="none",
+                    common.legend = TRUE, legend="right"),
+          nrow=1, ncol=2, labels = c("Spring", "Fall"), 
+          hjust = c(-4.7,-8.7), vjust = 1.2, align="none"
+)
+
+```
+
+**Days per oscillation index**
+
+-   **Blue**: EN delayed/higher *or* LN advanced/lower
+-   **Red**: LN delayed/higher *or* EN advanced/lower
+
+### NAO
+
+```{r maps nao}
+
+ggarrange(ggarrange(p11,
+                    p12,
+                    p13, 
+                    p14,
+                    
+                    nrow=4, ncol=1, labels = c("A q10","B q50",
+                                               "C q90","D Dur"), 
+                    vjust = 1, align="none",
+                    common.legend = TRUE, legend="right"),
+          ggarrange(p15,
+                    p16,
+                    p17, 
+                    p18,
+                    
+                    nrow=4, ncol=1, labels = c("E","F","G","H"),
+                    vjust = 1, align="none",
+                    common.legend = TRUE, legend="right"),
+          nrow=1, ncol=2, labels = c("Spring", "Fall"), 
+          hjust = c(-4.7,-8.7), vjust = 1.2, align="none"
+)
+
+```
+
+**Days per oscillation index**
+
+-   **Blue**: + delayed/higher *or* - advanced/lower
+-   **Red**: - delayed/higher *or* + advanced/lower
+
+# Notes
+
+## ENSO
+
+1. **Spring**
+  - In El Niño years, stormy conditions on Gulf Coast delay birds
+  - Other areas, earlier start 
+    + Higher temperature?
+  - Shorter duration in areas with delayed start
+  - Lower density in E coast in El Nino years
+  
+2. **Fall**
+  - In El Niño years, E coast has delayed start
+  - Areas with late start have shorter duration
+
+## NAO
+
+1. **Spring**
+  - Negative phase similar to El Niño
+
+2. **Fall**
+  - Positive phase has late finish everywhere
+    + Drought conditions cause delays?
+
+# Info
+
+## Climate classification
+
+*Köppen-Geiger climate classification system*
+
+-   **A**: Tropical
+-   **B**: Dry
+-   **C**: Temperate
+-   **D**: Continental
+
+[Click here for details about climate classes in the US](https://climateknowledgeportal.worldbank.org/country/united-states#:~:text=The%20five%20main%20groups%20are,your%20mouse%20over%20the%20legend.)
+
+## El Niño Southern Oscillation (ENSO)
+
+[Click here for details about ENSO](https://www.climate.gov/news-features/blogs/enso/what-el-niño–southern-oscillation-enso-nutshell)
+
+[Click here for ENSO phase comparison plots (atmospheric variables)](https://psl.noaa.gov/enso/compare/)
+
+## North Atlantic Oscillation (NAO)
+
+[Click here for details about NAO](https://www.climate.gov/news-features/understanding-climate/climate-variability-north-atlantic-oscillation)
