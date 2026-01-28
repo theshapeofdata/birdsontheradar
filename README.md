@@ -1,4 +1,4 @@
-# birdsontheradar
+# birds-on-the-radar
 - Ashwini Petchiappan, Uiversity of Oxford
 
 _Award-winning project on radar ornithology._
